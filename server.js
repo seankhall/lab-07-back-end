@@ -7,6 +7,11 @@ require('dotenv').config();
 const express = require('express');
 const superagent = require('superagent');
 const cors = require('cors');
+const pg = require('pg')
+
+//database setup
+const client = new pg.Client(process.env.DATABASE_URL);
+client.on('err', err => { throw err; });
 
 // Application Setup
 const PORT = process.env.PORT;
@@ -16,12 +21,22 @@ app.use(cors());
 let locations = {};
 
 // Route Definitions
+app.get('/coordinates', coordHandler)
 app.get('/location', locationHandler);
 app.get('/weather', weatherHandler);
 app.get('/yelp', yelpHandler);
 app.get('/trails', trailHandler);
 app.use('*', notFoundHandler);
 app.use(errorHandler);
+
+function coordHandler(req, res) {
+  let SQL = 'SELECT * FROM rantyler';
+  client.query(SQL)
+    .then(results => {
+      res.status(200).json(results.rows);
+    })
+    .catch(err => console.err(err));
+}
 
 //handlers
 function locationHandler(request, response) {
@@ -36,11 +51,20 @@ function locationHandler(request, response) {
         const geoData = data.body;
         const location = new Location(request.query.data, geoData);
         locations[url] = location;
-        response.send(location);
+
+        let latitude = geoData.results[0].geometry.location.lat;
+        let longitude = geoData.results[0].geometry.location.lng;
+        let safeValues = [latitude, longitude];
+
+        console.log('SAFE VAUES', safeValues)
+        let SQL = 'INSERT INTO location_table (latitude, longitude) VALUES ($1, $2) RETURNING *';
+        client.query(SQL, safeValues).then(results => {
+          response.status(200).json(results);
+        })
+          .catch(() => {
+            errorHandler('So sorry, something went wrong.', request, response);
+          });
       })
-      .catch(() => {
-        errorHandler('So sorry, something went wrong.', request, response);
-      });
   }
 }
 
@@ -130,7 +154,7 @@ function Weather(day) {
   this.time = new Date(day.time * 1000).toString().slice(0, 15);
 }
 
-function Trails(trail){
+function Trails(trail) {
   this.name = trail.name;
   this.location = trail.location;
   this.length = trail.length;
